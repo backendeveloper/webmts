@@ -1,0 +1,56 @@
+# Build sonuçları
+bin/
+obj/
+Debug/
+Release/
+*.exe
+*.dll
+*.app
+*.log
+
+# Kullanıcıya özgü ayar dosyaları
+*.user
+*.userdata
+*.suo
+*.userprefs
+*.aps
+*.cache
+*.ilk
+*.pdb
+*.opendb
+*.VC.db
+
+# Visual Studio, Rider, VS Code gibi IDE/Editor dosyaları
+.vs/
+.idea/
+.vscode/
+*.sw?
+
+# Paketler
+*.nupkg
+*.snupkg
+packages/
+paket-files/
+PackageRestoreFailed.txt
+*.nuspec
+*.psmdcp
+project.lock.json
+
+# DotNet-düzgün restore edilmemiş durum
+project.assets.json
+# Farklı temp dosyalar
+*~ 
+*.tmp
+
+#  Geliştirme sertifikaları (örnek)
+*.pfx
+*.p12
+
+# Publish çıktısı
+wwwroot/
+
+# Mac işletim sistemi ek ignore
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
