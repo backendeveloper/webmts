@@ -1,0 +1,6 @@
+@Webmts.TransactionService_HostAddress = http://localhost:5041
+
+GET {{Webmts.TransactionService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

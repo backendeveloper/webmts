@@ -1,0 +1,149 @@
+services:
+  # API Gateway with Traefik
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080" # Traefik dashboard
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - webmts-network
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./services/auth-service/Webmts.AuthService
+      dockerfile: Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=auth-db;Database=auth_db;Username=postgres;Password=postgres
+    depends_on:
+      - auth-db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
+      - "traefik.http.services.auth.loadbalancer.server.port=8080"
+    networks:
+      - webmts-network
+
+  auth-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=auth_db
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+    networks:
+      - webmts-network
+
+  # Customer Service
+  customer-service:
+    build:
+      context: ./services/customer-service/Webmts.CustomerService
+      dockerfile: Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=customer-db;Database=customer_db;Username=postgres;Password=postgres
+    depends_on:
+      - customer-db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.customer.rule=PathPrefix(`/api/customer`)"
+      - "traefik.http.services.customer.loadbalancer.server.port=8080"
+    networks:
+      - webmts-network
+
+  customer-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=customer_db
+    volumes:
+      - customer-db-data:/var/lib/postgresql/data
+    networks:
+      - webmts-network
+
+  # Transaction Service
+  transaction-service:
+    build:
+      context: ./services/transaction-service/Webmts.TransactionService
+      dockerfile: Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=transaction-db;Database=transaction_db;Username=postgres;Password=postgres
+    depends_on:
+      - transaction-db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.transaction.rule=PathPrefix(`/api/transaction`)"
+      - "traefik.http.services.transaction.loadbalancer.server.port=8080"
+    networks:
+      - webmts-network
+
+  transaction-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=transaction_db
+    volumes:
+      - transaction-db-data:/var/lib/postgresql/data
+    networks:
+      - webmts-network
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./services/notification-service/Webmts.NotificationService
+      dockerfile: Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=notification-db;Database=notification_db;Username=postgres;Password=postgres
+    depends_on:
+      - notification-db
+      - rabbitmq
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.notification.rule=PathPrefix(`/api/notification`)"
+      - "traefik.http.services.notification.loadbalancer.server.port=8080"
+    networks:
+      - webmts-network
+
+  notification-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=notification_db
+    volumes:
+      - notification-db-data:/var/lib/postgresql/data
+    networks:
+      - webmts-network
+
+  # RabbitMQ for async communication
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - webmts-network
+
+networks:
+  webmts-network:
+    name: webmts_webmts-network
+    external: true
+
+volumes:
+  auth-db-data:
+  customer-db-data:
+  transaction-db-data:
+  notification-db-data:

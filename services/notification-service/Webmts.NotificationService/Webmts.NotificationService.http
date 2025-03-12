@@ -1,0 +1,6 @@
+@Webmts.NotificationService_HostAddress = http://localhost:5018
+
+GET {{Webmts.NotificationService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
