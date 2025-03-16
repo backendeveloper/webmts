@@ -1,12 +1,40 @@
+using System.Text.Json;
+using AuthService.Client;
+using Autofac;
+using Autofac.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Configuration
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true);
+
+// builder.Configuration.AddConsulConfiguration();
+// builder.Services.AddConsulServices(builder.Configuration);
+
+builder.Services.AddHttpContextAccessor();
+// builder.Services.AddCachingServices(builder.Configuration);
+// builder.Services.AddSingleton<TraceContext>();
+
+// Log.Logger = new LoggerConfiguration()
+//     .ReadFrom.Configuration(builder.Configuration)
+//     .Filter.ByExcluding(Matching.FromSource("Microsoft.AspNetCore.Diagnostics.DeveloperExceptionPageMiddleware"))
+//     .Filter.ByExcluding(Matching.FromSource("Microsoft.AspNetCore.Server.Kestrel"))
+//     .Enrich.WithProperty("Application", "Kazan.API")
+//     .CreateLogger();
+// builder.Host.UseSerilog();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
+builder.Host.ConfigureContainer<ContainerBuilder>(containerBuilder =>
+{
+    containerBuilder.RegisterModule<ClientModule>();
+});
 
 builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy())
@@ -32,6 +60,7 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+// app.UseHttpsRedirection();
 app.UseAuthorization();
 
 app.MapHealthChecks("/api/auth/health", new HealthCheckOptions

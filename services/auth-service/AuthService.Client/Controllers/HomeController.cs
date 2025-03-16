@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace Webmts.AuthService.Controllers;
+namespace AuthService.Client.Controllers;
 
 [ApiController]
 [Route("api/auth")]

@@ -1,6 +1,0 @@
-@Webmts.AuthService_HostAddress = http://localhost:5063
-
-GET {{Webmts.AuthService_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
