@@ -1,11 +1,13 @@
 using System.Text.Json;
 using AuthService.Client;
-using AuthService.Client.Infrastructure.Consul;
 using AuthService.Client.Infrastructure.HealthChecks;
 using AuthService.Client.Infrastructure.Vault;
 using AuthService.Client.Middlewares;
 using AuthService.Common.Caching;
+using AuthService.Common.Configuration;
 using AuthService.Common.Logging;
+using AuthService.Common.ServiceDiscovery;
+using AuthService.Common.ServiceDiscovery.Interfaces;
 using AuthService.Data;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
@@ -25,11 +27,23 @@ var initialConfig = new ConfigurationBuilder()
     .AddEnvironmentVariables()
     .Build();
 
+AuthService.Client.Infrastructure.Logging.SerilogHelper.ConfigureLogging(initialConfig);
+builder.Host.UseSerilog();
+
 // builder.Configuration.Clear(); // TODO: burasi hata veriyor
-builder.Configuration
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
-    .AddEnvironmentVariables();
+// builder.Configuration
+//     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+//     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
+//     .AddEnvironmentVariables();
+
+builder.Services.AddSingleton<IConsulClient>(_ => {
+    var consulHost = initialConfig["Consul:Host"] ?? "consul";
+    var consulPort = int.Parse(initialConfig["Consul:Port"] ?? "8500");
+    return new ConsulClient(config => {
+        config.Address = new Uri($"http://{consulHost}:{consulPort}");
+    });
+});
+builder.Services.AddConsulServices(initialConfig);
 
 try
 {
@@ -38,19 +52,7 @@ try
 catch (Exception ex)
 {
     Console.WriteLine($"Error loading configuration from Vault: {ex.Message}");
-    // Hata durumunda devam et, varsayılan yapılandırma kullanılacak
 }
-
-AuthService.Client.Infrastructure.Logging.SerilogHelper.ConfigureLogging(builder.Configuration);
-builder.Host.UseSerilog();
-
-builder.Services.AddSingleton<IConsulClient>(provider => new ConsulClient(config =>
-{
-    var consulHost = builder.Configuration["Consul:Host"] ?? "consul";
-    var consulPort = int.Parse(builder.Configuration["Consul:Port"] ?? "8500");
-    config.Address = new Uri($"http://{consulHost}:{consulPort}");
-}));
-builder.Services.AddSingleton<IServiceRegistration, ConsulServiceRegistration>();
 
 builder.Services.AddSingleton<IVaultClient>(provider => {
     var vaultUrl = builder.Configuration["Vault:Url"] ?? "http://vault:8200";
@@ -93,16 +95,27 @@ var app = builder.Build();
 
 await InitializeVaultAsync(app);
 
-app.Services.GetRequiredService<IServiceRegistration>().RegisterService(
-    new ConsulRegistrationInfo
-    {
-        ServiceId = "auth-service-" + Guid.NewGuid().ToString(),
-        ServiceName = "auth-service",
-        ServiceAddress = app.Configuration["ServiceSettings:ServiceAddress"] ?? "auth-service",
-        ServicePort = 8080,
-        HealthCheckEndpoint = "api/auth/health"
-    });
+try {
+    var serviceName = initialConfig["Service:Name"] ?? "auth-service";
+    var keyValueStore = app.Services.GetService<IKeyValueStore>();
+    var logger = app.Services.GetService<ILogger<DynamicConsulConfigurationProvider>>();
+    
+    // Eğer servisler mevcutsa dinamik yapılandırma ekle
+    if (keyValueStore != null && logger != null) {
+        var configBuilder = new ConfigurationBuilder();
+        configBuilder.AddDynamicConsul(keyValueStore, serviceName, logger);
+        
+        // Dinamik yapılandırmayı mevcut yapılandırmaya ekle
+        // var dynamicConfig = configBuilder.Build();
+        // ((IConfigurationRoot)app.Configuration).AddDynamicConsul(dynamicConfig);
+        // configBuilder.AddDynamicConsul(keyValueStore, serviceName, logger);
 
+        
+        app.Logger.LogInformation("Dynamic Consul configuration added successfully");
+    }
+} catch (Exception ex) {
+    app.Logger.LogWarning("Could not add dynamic Consul configuration: {ErrorMessage}", ex.Message);
+}
 
 if (app.Environment.IsDevelopment())
 {
