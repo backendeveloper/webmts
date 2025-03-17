@@ -6,7 +6,9 @@ services:
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=webmts_webmts-network"
       - "--entrypoints.web.address=:80"
+      - "--log.level=DEBUG"
     ports:
       - "80:80"
       - "8080:8080"
@@ -33,21 +35,21 @@ services:
     build:
       context: .
       dockerfile: services/auth-service/AuthService.Client/Dockerfile
+    container_name: webmts-auth-service
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
       - ConnectionStrings__DefaultConnection=Host=auth-db;Database=auth_db;Username=postgres;Password=postgres
+    ports:
+      - "8081:8080"  # Doğrudan erişim için port mapping ekleyelim
     depends_on:
       auth-db:
         condition: service_healthy
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost/api/auth/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
-      - "traefik.http.services.auth.loadbalancer.server.port=8080"
+      - "traefik.http.routers.auth-router.rule=PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth.service=auth-svc"
+      - "traefik.http.services.auth-svc.loadbalancer.server.port=8080"
     networks:
       - webmts-network
 
