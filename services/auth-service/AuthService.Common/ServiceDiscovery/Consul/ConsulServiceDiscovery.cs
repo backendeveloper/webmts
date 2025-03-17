@@ -23,8 +23,6 @@ public class ConsulServiceDiscovery : IServiceDiscovery
 
     public async Task RegisterServiceAsync(string serviceName, string serviceId = null)
     {
-        serviceId ??= $"{serviceName}-{Guid.NewGuid()}";
-
         var serviceCheck = new AgentServiceCheck
         {
             HTTP = $"http://{_serviceConfig.Address}:{_serviceConfig.Port}/{_serviceConfig.HealthCheckEndpoint}",
@@ -34,15 +32,14 @@ public class ConsulServiceDiscovery : IServiceDiscovery
         };
 
         var tags = _serviceConfig.Tags.ToList();
-        tags.AddRange(new[]
-        {
+        tags.AddRange([
             "webmts",
             "microservice",
             "api",
             "traefik.enable=true",
             $"traefik.http.routers.{serviceName}.rule=PathPrefix(`/api/{serviceName}`)",
             $"traefik.http.services.{serviceName}.loadbalancer.server.port={_serviceConfig.Port}"
-        });
+        ]);
 
         var registration = new AgentServiceRegistration
         {
@@ -60,20 +57,5 @@ public class ConsulServiceDiscovery : IServiceDiscovery
     public async Task DeregisterServiceAsync(string serviceId)
     {
         await _consulClient.Agent.ServiceDeregister(serviceId);
-    }
-
-    public async Task<IEnumerable<ServiceInfo>> GetServicesAsync(string serviceName = null)
-    {
-        var queryResult = await _consulClient.Health.Service(serviceName ?? string.Empty, string.Empty, false);
-
-        return queryResult.Response.Select(serviceEntry => new ServiceInfo
-        {
-            Id = serviceEntry.Service.ID,
-            Name = serviceEntry.Service.Service,
-            Address = serviceEntry.Service.Address,
-            Port = serviceEntry.Service.Port,
-            Tags = serviceEntry.Service.Tags,
-            Healthy = serviceEntry.Checks.All(c => c.Status == HealthStatus.Passing)
-        });
     }
 }

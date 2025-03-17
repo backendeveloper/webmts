@@ -27,9 +27,12 @@ public class ConsulKeyValueStore : IKeyValueStore
     {
         try
         {
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentNullException(nameof(key));
+
             var kvPair = new KVPair(key)
             {
-                Value = Encoding.UTF8.GetBytes(value)
+                Value = Encoding.UTF8.GetBytes(value ?? string.Empty)
             };
 
             var result = await _consulClient.KV.Put(kvPair);
@@ -64,6 +67,9 @@ public class ConsulKeyValueStore : IKeyValueStore
     {
         try
         {
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentNullException(nameof(key));
+
             var getPair = await _consulClient.KV.Get(key);
             if (getPair.Response != null && getPair.Response.Value != null)
             {
@@ -74,7 +80,6 @@ public class ConsulKeyValueStore : IKeyValueStore
 
             _logger.LogDebug("No value found in Consul for key: {Key}", key);
             
-            // Eğer configuration verilmişse ve değer Consul'da yoksa, configuration'dan almayı dene
             if (_configuration != null)
             {
                 var configKey = ConvertConsulKeyToConfigKey(key);
@@ -117,6 +122,9 @@ public class ConsulKeyValueStore : IKeyValueStore
     {
         try
         {
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentNullException(nameof(key));
+                
             var result = await _consulClient.KV.Delete(key);
             _logger.LogDebug("Deleted key from Consul: {Key}", key);
             return result.Response;
@@ -134,6 +142,9 @@ public class ConsulKeyValueStore : IKeyValueStore
 
         try
         {
+            if (string.IsNullOrEmpty(prefix))
+                throw new ArgumentNullException(nameof(prefix));
+                
             var consulResult = await _consulClient.KV.List(prefix);
             if (consulResult.Response != null)
             {
@@ -148,7 +159,6 @@ public class ConsulKeyValueStore : IKeyValueStore
 
             _logger.LogDebug("Retrieved {Count} values from Consul with prefix {Prefix}", result.Count, prefix);
             
-            // Eğer Consul'dan hiç değer gelmezse ve configuration verilmişse, konfigürasyondan almayı dene
             if (result.Count == 0 && _configuration != null)
             {
                 var section = GetConfigurationSectionFromPrefix(prefix);
@@ -191,7 +201,6 @@ public class ConsulKeyValueStore : IKeyValueStore
             _logger.LogInformation("Syncing configuration section {SectionName} to Consul at {ConsulPrefix}", 
                 sectionName, consulPrefix);
 
-            // Senkronizasyon başlangıcını kontrol et
             var initialized = await GetValueAsync($"{consulPrefix}/initialized");
             if (initialized == "true")
             {
@@ -199,17 +208,14 @@ public class ConsulKeyValueStore : IKeyValueStore
                 return true;
             }
 
-            // Konfigürasyon değerlerini düzleştir
             var values = FlattenConfigurationSection(section);
             
-            // Her değeri Consul'a ekle
             foreach (var kvp in values)
             {
                 var consulKey = $"{consulPrefix}/{kvp.Key.Replace(":", "/")}";
                 await SetValueAsync(consulKey, kvp.Value);
             }
 
-            // Senkronizasyonun tamamlandığını işaretle
             await SetValueAsync($"{consulPrefix}/initialized", "true");
             
             _logger.LogInformation("Successfully synced {Count} values from configuration section {SectionName} to Consul", 
@@ -237,7 +243,7 @@ public class ConsulKeyValueStore : IKeyValueStore
             _logger.LogInformation("Starting full configuration synchronization to Consul for service {ServiceName}", 
                 serviceName);
 
-            // Önce global senkronizasyon durumunu kontrol et
+            // Check if already fully synced
             var fullySynced = await GetValueAsync($"{serviceName}/config/fully_synced");
             if (fullySynced == "true")
             {
@@ -246,22 +252,22 @@ public class ConsulKeyValueStore : IKeyValueStore
                 return true;
             }
 
-            // Tüm birinci seviye konfigürasyon bölümlerini senkronize et
+            // Sync all first-level configuration sections
             var children = _configuration.GetChildren();
             foreach (var child in children)
             {
-                // Özel durumlar: ConnectionStrings, Logging gibi bölümleri atla
+                // Skip special sections
                 if (child.Key == "ConnectionStrings" || child.Key == "Logging" || 
                     child.Key == "AllowedHosts")
                     continue;
 
-                // Bölümü Consul'a senkronize et
+                // Sync section to Consul
                 await SyncConfigurationSectionToConsulAsync(
                     child.Key, 
                     $"{serviceName}/config/{child.Key.ToLowerInvariant()}");
             }
 
-            // Bağlantı dizelerini ayrıca senkronize et
+            // Separately sync connection strings
             var connectionStrings = _configuration.GetSection("ConnectionStrings");
             if (connectionStrings.Exists())
             {
@@ -270,8 +276,9 @@ public class ConsulKeyValueStore : IKeyValueStore
                     $"{serviceName}/config/connectionstrings");
             }
 
-            // Tam senkronizasyonu işaretle
+            // Mark as fully synced
             await SetValueAsync($"{serviceName}/config/fully_synced", "true");
+            await SetValueAsync($"{serviceName}/config/last_sync", DateTime.UtcNow.ToString("o"));
             
             _logger.LogInformation("Successfully synced all configurations to Consul for service {ServiceName}", 
                 serviceName);
@@ -287,14 +294,14 @@ public class ConsulKeyValueStore : IKeyValueStore
 
     private string ConvertConsulKeyToConfigKey(string consulKey)
     {
-        // Örnek: "auth-service/config/jwt/issuer" -> "jwt:issuer"
+        // Example: "auth-service/config/jwt/issuer" -> "jwt:issuer"
         var parts = consulKey.Split('/');
         
-        // En az 3 parça bekle: service/config/section
+        // Expect at least 3 parts: service/config/section
         if (parts.Length < 3)
             return consulKey.Replace("/", ":");
             
-        // Servis adı ve config kısmını atla
+        // Skip service name and config part
         var configPath = parts.Skip(2).ToArray();
         return string.Join(":", configPath);
     }
@@ -304,14 +311,14 @@ public class ConsulKeyValueStore : IKeyValueStore
         if (_configuration == null)
             return null;
             
-        // Örnek: "auth-service/config/jwt" -> configuration.GetSection("jwt")
+        // Example: "auth-service/config/jwt" -> configuration.GetSection("jwt")
         var parts = prefix.Split('/').ToList();
         
-        // En az service/config/section formatını bekle
+        // Need at least service/config/section format
         if (parts.Count < 3)
             return null;
             
-        // Servis ve config kısmını atla, section adını al
+        // Skip service and config, get section name
         return _configuration.GetSection(parts[2]);
     }
 
@@ -319,10 +326,10 @@ public class ConsulKeyValueStore : IKeyValueStore
     {
         var result = new Dictionary<string, string>();
         
-        // Alt bölümleri ve değerleri düzleştir
+        // Flatten section and children
         FlattenSection(section, "", result);
         
-        // Eğer key prefix verilmişse, anahtarları düzenle
+        // Add key prefix if provided
         if (!string.IsNullOrEmpty(keyPrefix))
         {
             return result.ToDictionary(

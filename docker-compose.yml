@@ -97,6 +97,8 @@ services:
       - "8500:8500"
       - "8600:8600/udp"
     command: "agent -dev -client=0.0.0.0 -ui"
+    volumes:
+      - consul-data:/consul/data
     networks:
       - webmts-network
     healthcheck:
@@ -115,6 +117,10 @@ services:
       - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
     cap_add:
       - IPC_LOCK
+    volumes:
+      - vault-data:/vault/data
+      - vault-logs:/vault/logs
+      - vault-config:/vault/config
     networks:
       - webmts-network
     healthcheck:
@@ -249,3 +255,7 @@ volumes:
   transaction-db-data:
   notification-db-data:
   elasticsearch-data:
+  consul-data:
+  vault-data:
+  vault-logs:
+  vault-config:

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AuthService.Client;
+using AuthService.Client.Infrastructure.Consul;
 using AuthService.Client.Infrastructure.HealthChecks;
 using AuthService.Client.Infrastructure.Vault;
 using AuthService.Client.Middlewares;
@@ -7,6 +8,7 @@ using AuthService.Common.Caching;
 using AuthService.Common.Configuration;
 using AuthService.Common.Logging;
 using AuthService.Common.ServiceDiscovery;
+using AuthService.Common.ServiceDiscovery.Consul;
 using AuthService.Common.ServiceDiscovery.Interfaces;
 using AuthService.Data;
 using Autofac;
@@ -43,7 +45,42 @@ builder.Services.AddSingleton<IConsulClient>(_ => {
         config.Address = new Uri($"http://{consulHost}:{consulPort}");
     });
 });
-builder.Services.AddConsulServices(initialConfig);
+
+builder.Services.Configure<ServiceConfig>(options => {
+    options.Name = initialConfig["Service:Name"] ?? "auth-service";
+    options.Address = initialConfig["Service:Address"] ?? "auth-service";
+    options.Port = int.Parse(initialConfig["Service:Port"] ?? "8080");
+    options.HealthCheckEndpoint = initialConfig["Service:HealthCheckEndpoint"] ?? "api/auth/health";
+    options.Tags = (initialConfig.GetSection("Service:Tags").Get<string[]>() ?? new[] { "auth", "api" });
+});
+
+builder.Services.AddSingleton<IKeyValueStore, ConsulKeyValueStore>();
+builder.Services.AddSingleton<IServiceDiscovery, ConsulServiceDiscovery>();
+builder.Services.AddHostedService<ConsulHostedService>();
+
+try 
+{
+    var consulClient = builder.Services.BuildServiceProvider().GetRequiredService<IConsulClient>();
+    var loggerFactory = builder.Services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
+    var logger = loggerFactory.CreateLogger("ConsulConfiguration");
+    var serviceName = initialConfig["Service:Name"] ?? "auth-service";
+    var environment = builder.Environment.EnvironmentName;
+    
+    await initialConfig.SyncAppSettingsToConsulAsync(consulClient, serviceName, environment, logger);
+    
+    builder.Configuration.AddConsulJsonConfiguration(
+        consulClient, 
+        serviceName, 
+        environment, 
+        logger, 
+        builder.Services.BuildServiceProvider());
+    
+    Console.WriteLine("Consul'dan JSON yapılandırması başarıyla eklendi");
+}
+catch (Exception ex) 
+{
+    Console.WriteLine($"Consul'dan yapılandırma eklenirken hata: {ex.Message}");
+}
 
 try
 {
@@ -54,13 +91,14 @@ catch (Exception ex)
     Console.WriteLine($"Error loading configuration from Vault: {ex.Message}");
 }
 
-builder.Services.AddSingleton<IVaultClient>(provider => {
+builder.Services.AddSingleton<IVaultClient>(provider =>
+{
     var vaultUrl = builder.Configuration["Vault:Url"] ?? "http://vault:8200";
     var vaultToken = builder.Configuration["Vault:Token"] ?? "webmts-root-token";
-    
+
     var tokenAuthMethod = new TokenAuthMethodInfo(vaultToken);
     var vaultClientSettings = new VaultClientSettings(vaultUrl, tokenAuthMethod);
-    
+
     return new VaultClient(vaultClientSettings);
 });
 builder.Services.AddSingleton<ISecretManager, VaultSecretManager>();
@@ -86,36 +124,50 @@ builder.Host.ConfigureContainer<ContainerBuilder>(containerBuilder =>
 
 builder.Services.AddWebMtsHealthChecks(builder.Configuration);
 
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.ListenAnyIP(8080);
-});
+builder.WebHost.ConfigureKestrel(options => { options.ListenAnyIP(8080); });
+
+// try
+// {
+//     var consulClient = builder.Services.BuildServiceProvider().GetRequiredService<IConsulClient>();
+//     var loggerFactory = builder.Services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
+//     var logger = loggerFactory.CreateLogger("ConsulConfiguration");
+//     var serviceName = initialConfig["Service:Name"] ?? "auth-service";
+//     var environment = builder.Environment.EnvironmentName;
+//
+//     // JSON dosyalarını Consul'a senkronize et
+//     await initialConfig.SyncAppSettingsToConsulAsync(consulClient, serviceName, environment, logger);
+//
+//     // Consul'dan JSON yapılandırmasını yükle
+//     builder.Configuration.AddConsulJsonConfiguration(consulClient, serviceName, environment, logger);
+//
+//     Console.WriteLine("Consul'dan JSON yapılandırması başarıyla eklendi");
+// }
+// catch (Exception ex)
+// {
+//     Console.WriteLine($"Consul'dan dinamik yapılandırma eklenirken hata: {ex.Message}");
+// }
 
 var app = builder.Build();
 
 await InitializeVaultAsync(app);
 
-try {
-    var serviceName = initialConfig["Service:Name"] ?? "auth-service";
-    var keyValueStore = app.Services.GetService<IKeyValueStore>();
-    var logger = app.Services.GetService<ILogger<DynamicConsulConfigurationProvider>>();
-    
-    // Eğer servisler mevcutsa dinamik yapılandırma ekle
-    if (keyValueStore != null && logger != null) {
-        var configBuilder = new ConfigurationBuilder();
-        configBuilder.AddDynamicConsul(keyValueStore, serviceName, logger);
-        
-        // Dinamik yapılandırmayı mevcut yapılandırmaya ekle
-        // var dynamicConfig = configBuilder.Build();
-        // ((IConfigurationRoot)app.Configuration).AddDynamicConsul(dynamicConfig);
-        // configBuilder.AddDynamicConsul(keyValueStore, serviceName, logger);
+// try
+// {
+//     var serviceName = initialConfig["Service:Name"] ?? "auth-service";
+//     var keyValueStore = app.Services.GetService<IKeyValueStore>();
+//
+//     if (keyValueStore != null)
+//     {
+//         // appsettings.json'ı Consul'a senkronize et
+//         await keyValueStore.SyncAllConfigurationsToConsulAsync(serviceName);
+//         app.Logger.LogInformation("appsettings.json yapılandırması Consul'a başarıyla senkronize edildi");
+//     }
+// }
+// catch (Exception ex)
+// {
+//     app.Logger.LogWarning("Consul yapılandırma senkronizasyonu başarısız: {ErrorMessage}", ex.Message);
+// }
 
-        
-        app.Logger.LogInformation("Dynamic Consul configuration added successfully");
-    }
-} catch (Exception ex) {
-    app.Logger.LogWarning("Could not add dynamic Consul configuration: {ErrorMessage}", ex.Message);
-}
 
 if (app.Environment.IsDevelopment())
 {
@@ -156,6 +208,8 @@ app.MapHealthChecks("/api/auth/health", new HealthCheckOptions
     }
 });
 
+app.UseConsul();
+
 app.MapGet("/api/auth", () => "Auth Service is running!");
 
 app.MapControllers();
@@ -168,7 +222,7 @@ async Task InitializeVaultAsync(WebApplication app)
     {
         var secretManager = app.Services.GetRequiredService<ISecretManager>();
         var logger = app.Services.GetRequiredService<ILogger<Program>>();
-        
+
         var jwtKey = builder.Configuration["Jwt:Key"];
         if (!string.IsNullOrEmpty(jwtKey))
         {
@@ -178,12 +232,12 @@ async Task InitializeVaultAsync(WebApplication app)
             });
             logger.LogInformation("JWT key stored in Vault");
         }
-        
+
         await secretManager.SetSecretAsync("webmts/auth/db", new Dictionary<string, object?>
         {
             { "connectionString", builder.Configuration.GetConnectionString("DefaultConnection") }
         });
-        
+
         logger.LogInformation("Vault initialized with secrets");
     }
     catch (Exception ex)
