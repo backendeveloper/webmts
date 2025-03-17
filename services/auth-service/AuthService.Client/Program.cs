@@ -1,5 +1,8 @@
 using System.Text.Json;
 using AuthService.Client;
+using AuthService.Client.Middlewares;
+using AuthService.Common.Caching;
+using AuthService.Common.Logging;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -15,8 +18,8 @@ builder.Configuration
 // builder.Services.AddConsulServices(builder.Configuration);
 
 builder.Services.AddHttpContextAccessor();
-// builder.Services.AddCachingServices(builder.Configuration);
-// builder.Services.AddSingleton<TraceContext>();
+builder.Services.AddCachingServices(builder.Configuration);
+builder.Services.AddSingleton<TraceContext>();
 
 // Log.Logger = new LoggerConfiguration()
 //     .ReadFrom.Configuration(builder.Configuration)
@@ -42,16 +45,19 @@ builder.Services.AddHealthChecks()
         builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty,
         name: "authdb-check",
         tags: ["authdb"]
+    )
+    .AddRedis(
+        builder.Configuration.GetSection("CacheSettings:DistributedCache:ConnectionString").Value ?? string.Empty,
+        name: "redis-check",
+        tags: new[] { "redis" }
     );
+
 
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger(c =>
-    {
-        c.RouteTemplate = "api/auth/swagger/{documentName}/swagger.json";
-    });
+    app.UseSwagger(c => { c.RouteTemplate = "api/auth/swagger/{documentName}/swagger.json"; });
 
     app.UseSwaggerUI(c =>
     {
@@ -61,6 +67,7 @@ if (app.Environment.IsDevelopment())
 }
 
 // app.UseHttpsRedirection();
+app.UseMiddleware<TraceMiddleware>();
 app.UseAuthorization();
 
 app.MapHealthChecks("/api/auth/health", new HealthCheckOptions
@@ -74,9 +81,11 @@ app.MapHealthChecks("/api/auth/health", new HealthCheckOptions
     ResponseWriter = async (context, report) =>
     {
         context.Response.ContentType = "application/json; charset=utf-8";
-        var json = JsonSerializer.Serialize(new {
+        var json = JsonSerializer.Serialize(new
+        {
             status = report.Status.ToString(),
-            checks = report.Entries.Select(e => new {
+            checks = report.Entries.Select(e => new
+            {
                 name = e.Key,
                 status = e.Value.Status.ToString(),
                 error = e.Value.Exception?.Message

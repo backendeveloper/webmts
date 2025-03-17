@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using AuthService.Business.Models;
+using AuthService.Common.Exceptions;
 using AuthService.Contract.Dtos;
 using AuthService.Contract.Requests;
 using AuthService.Contract.Responses;

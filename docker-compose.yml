@@ -14,6 +14,16 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     networks:
       - webmts-network
+      
+  # Redis service
+  redis:
+    image: redis:alpine
+    container_name: webmts-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - webmts-network
 
   # Auth Service
   auth-service:
