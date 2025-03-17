@@ -1,7 +1,7 @@
 services:
-  # API Gateway with Traefik
   traefik:
-    image: traefik:v2.10
+    image: traefik:v3.0
+    restart: always
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
@@ -9,32 +9,41 @@ services:
       - "--entrypoints.web.address=:80"
     ports:
       - "80:80"
-      - "8080:8080" # Traefik dashboard
+      - "8080:8080"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     networks:
       - webmts-network
       
-  # Redis service
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
+    restart: unless-stopped
     container_name: webmts-redis
-    restart: always
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     ports:
       - "6379:6379"
     networks:
       - webmts-network
 
-  # Auth Service
   auth-service:
     build:
-      context: ./services/auth-service/Webmts.AuthService
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/auth-service/AuthService.Client/Dockerfile
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Host=auth-db;Database=auth_db;Username=postgres;Password=postgres
     depends_on:
-      - auth-db
+      auth-db:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost/api/auth/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
@@ -43,11 +52,18 @@ services:
       - webmts-network
 
   auth-db:
-    image: postgres:15
+    image: postgres:16-alpine
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=auth_db
+    ports:
+        - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d auth_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     volumes:
       - auth-db-data:/var/lib/postgresql/data
     networks:
@@ -140,17 +156,20 @@ services:
 
   # RabbitMQ for async communication
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:3-management-alpine
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "check_port_connectivity" ]
     networks:
       - webmts-network
 
 networks:
   webmts-network:
     name: webmts_webmts-network
-    external: true
+    driver: bridge
+#    external: true
 
 volumes:
   auth-db-data:

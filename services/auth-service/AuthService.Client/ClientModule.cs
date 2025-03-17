@@ -1,4 +1,5 @@
 using AuthService.Business;
+using AuthService.Common.Pipelines;
 using Autofac;
 using FluentValidation;
 using MediatR;
@@ -13,6 +14,12 @@ public class ClientModule : Module
         
         builder.RegisterType<Mediator>().As<IMediator>().InstancePerLifetimeScope();
         
+        // builder.RegisterGeneric(typeof(ExceptionHandlingBehavior<,>)).As(typeof(IPipelineBehavior<,>)).InstancePerLifetimeScope();
+        builder.RegisterGeneric(typeof(LoggingPipelineBehavior<,>)).As(typeof(IPipelineBehavior<,>)).InstancePerLifetimeScope();
+        // builder.RegisterGeneric(typeof(CacheBehavior<,>)).As(typeof(IPipelineBehavior<,>)).InstancePerLifetimeScope();
+        builder.RegisterGeneric(typeof(InputValidationBehavior<,>)).As(typeof(IPipelineBehavior<,>));
+        builder.RegisterGeneric(typeof(BusinessValidationBehavior<,>)).As(typeof(IPipelineBehavior<,>)).InstancePerLifetimeScope();
+
         // builder.RegisterGeneric(typeof(ExceptionHandlingBehavior<,>)).As(typeof(IPipelineBehavior<,>)).InstancePerLifetimeScope();
         // builder.RegisterGeneric(typeof(LoggingPipelineBehavior<,>)).As(typeof(IPipelineBehavior<,>)).InstancePerLifetimeScope();
         // builder.RegisterGeneric(typeof(CacheBehavior<,>)).As(typeof(IPipelineBehavior<,>)).InstancePerLifetimeScope();

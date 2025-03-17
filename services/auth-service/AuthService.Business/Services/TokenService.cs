@@ -4,7 +4,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AuthService.Common.Caching;
+using AuthService.Common.Exceptions;
 using AuthService.Contract.Dtos;
+using AuthService.Data;
+using AuthService.Data.Entities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
@@ -15,13 +18,23 @@ public class TokenService : ITokenService
 {
     private readonly IConfiguration _configuration;
     private readonly ICacheService _cacheService;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TokenService> _logger;
 
-    // Redis key prefixes
     private const string ACCESS_TOKEN_PREFIX = "access_token:";
-    private const string REFRESH_TOKEN_PREFIX = "refresh_token:";
-    private const string USER_REFRESH_TOKENS_PREFIX = "user_refresh_tokens:";
     
+    public TokenService(
+        IConfiguration configuration,
+        ICacheService cacheService,
+        IUnitOfWork unitOfWork,
+        ILogger<TokenService> logger)
+    {
+        _configuration = configuration;
+        _cacheService = cacheService;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
     public async Task<(string accessToken, DateTime expiration)> GenerateAccessTokenAsync(UserDto user)
     {
         var expiryMinutes = _configuration.GetValue("TokenSettings:AccessTokenExpiryMinutes", 60);
@@ -38,7 +51,6 @@ public class TokenService : ITokenService
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
-        // Add roles as claims
         claims.AddRange(user.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
         var tokenDescriptor = new SecurityTokenDescriptor
@@ -53,7 +65,6 @@ public class TokenService : ITokenService
         var token = tokenHandler.CreateToken(tokenDescriptor);
         var encodedToken = tokenHandler.WriteToken(token);
 
-        // Store token info in Redis
         var redisKey = $"{ACCESS_TOKEN_PREFIX}{encodedToken}";
         var userJson = JsonSerializer.Serialize(user);
         await _cacheService.SetAsync(redisKey, userJson, TimeSpan.FromMinutes(expiryMinutes));
@@ -63,35 +74,48 @@ public class TokenService : ITokenService
 
     public async Task<string> GenerateRefreshTokenAsync(Guid userId)
     {
-        var refreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
-        var expiryDays = _configuration.GetValue<int>("TokenSettings:RefreshTokenExpiryDays", 7);
+        try
+        {
+            var refreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+            var expiryDays = _configuration.GetValue<int>("TokenSettings:RefreshTokenExpiryDays", 7);
+            
+            var tokenEntity = new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                Token = refreshToken,
+                UserId = userId,
+                ExpiresAt = DateTime.UtcNow.AddDays(expiryDays),
+                IsRevoked = false
+            };
+            
+            await _unitOfWork.RefreshTokens.AddAsync(tokenEntity);
+            await _unitOfWork.CompleteAsync();
 
-        // Store refresh token in Redis
-        var redisRefreshKey = $"{REFRESH_TOKEN_PREFIX}{refreshToken}";
-        await _cacheService.SetAsync(redisRefreshKey, userId.ToString(), TimeSpan.FromDays(expiryDays));
-
-        // Add to the user's set of refresh tokens
-        var userRefreshTokensKey = $"{USER_REFRESH_TOKENS_PREFIX}{userId}";
-        
-        // Get existing tokens or initialize a new set
-        var existingTokens = await _cacheService.GetAsync<List<string>>(userRefreshTokensKey) ?? new List<string>();
-        existingTokens.Add(refreshToken);
-        
-        // Update the set in Redis
-        await _cacheService.SetAsync(userRefreshTokensKey, existingTokens, TimeSpan.FromDays(expiryDays * 2));
-
-        return refreshToken;
+            return refreshToken;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating refresh token for user {UserId}", userId);
+            throw new BusinessValidationException("Failed to generate refresh token");
+        }
     }
 
     public async Task<bool> ValidateTokenAsync(string token)
     {
+        if (string.IsNullOrEmpty(token))
+            return false;
+            
         var redisKey = $"{ACCESS_TOKEN_PREFIX}{token}";
         var userJson = await _cacheService.GetAsync<string>(redisKey);
+        
         return !string.IsNullOrEmpty(userJson);
     }
 
     public async Task<UserDto> GetUserFromTokenAsync(string token)
     {
+        if (string.IsNullOrEmpty(token))
+            return null;
+            
         var redisKey = $"{ACCESS_TOKEN_PREFIX}{token}";
         var userJson = await _cacheService.GetAsync<string>(redisKey);
 
@@ -113,59 +137,37 @@ public class TokenService : ITokenService
 
     public async Task<bool> IsRefreshTokenValidAsync(Guid userId, string refreshToken)
     {
-        var redisRefreshKey = $"{REFRESH_TOKEN_PREFIX}{refreshToken}";
-        var storedUserId = await _cacheService.GetAsync<string>(redisRefreshKey);
-
-        if (string.IsNullOrEmpty(storedUserId))
-        {
+        if (string.IsNullOrEmpty(refreshToken))
             return false;
-        }
-
-        // Also verify this refresh token belongs to the specified user
-        var userRefreshTokensKey = $"{USER_REFRESH_TOKENS_PREFIX}{userId}";
-        var userTokens = await _cacheService.GetAsync<List<string>>(userRefreshTokensKey) ?? new List<string>();
-        
-        return storedUserId == userId.ToString() && userTokens.Contains(refreshToken);
+            
+        return await _unitOfWork.RefreshTokens.IsTokenValidAsync(refreshToken, userId);
     }
 
     public async Task RevokeRefreshTokenAsync(Guid userId, string refreshToken)
     {
-        // Remove the refresh token
-        var redisRefreshKey = $"{REFRESH_TOKEN_PREFIX}{refreshToken}";
-        await _cacheService.RemoveAsync(redisRefreshKey);
-
-        // Remove from user's set of refresh tokens
-        var userRefreshTokensKey = $"{USER_REFRESH_TOKENS_PREFIX}{userId}";
-        var userTokens = await _cacheService.GetAsync<List<string>>(userRefreshTokensKey) ?? new List<string>();
-        userTokens.Remove(refreshToken);
+        var token = await _unitOfWork.RefreshTokens.GetByTokenAsync(refreshToken);
         
-        if (userTokens.Any())
+        if (token != null && token.UserId == userId)
         {
-            // Update the set in Redis if it's not empty
-            var expiryDays = _configuration.GetValue<int>("TokenSettings:RefreshTokenExpiryDays", 7);
-            await _cacheService.SetAsync(userRefreshTokensKey, userTokens, TimeSpan.FromDays(expiryDays * 2));
-        }
-        else
-        {
-            // If empty, just remove the entire key
-            await _cacheService.RemoveAsync(userRefreshTokensKey);
+            token.IsRevoked = true;
+            await _unitOfWork.CompleteAsync();
         }
     }
 
     public async Task RevokeAllUserTokensAsync(Guid userId)
     {
-        // Get all refresh tokens for user
-        var userRefreshTokensKey = $"{USER_REFRESH_TOKENS_PREFIX}{userId}";
-        var refreshTokens = await _cacheService.GetAsync<List<string>>(userRefreshTokensKey) ?? new List<string>();
-
-        // Delete each refresh token
-        foreach (var token in refreshTokens)
+        try
         {
-            var redisRefreshKey = $"{REFRESH_TOKEN_PREFIX}{token}";
-            await _cacheService.RemoveAsync(redisRefreshKey);
+            var userTokens = await _unitOfWork.RefreshTokens.GetByUserIdAsync(userId);
+            foreach (var token in userTokens) 
+                token.IsRevoked = true;
+            
+            await _unitOfWork.CompleteAsync();
         }
-
-        // Delete the set of refresh tokens
-        await _cacheService.RemoveAsync(userRefreshTokensKey);
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error revoking all tokens for user {UserId}", userId);
+            throw new BusinessValidationException("Failed to revoke tokens");
+        }
     }
 }

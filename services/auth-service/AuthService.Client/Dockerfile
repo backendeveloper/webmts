@@ -1,20 +1,26 @@
-﻿FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-WORKDIR /app
-EXPOSE 80
-
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+﻿FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-COPY ["Webmts.AuthService.csproj", "./"]
-RUN dotnet restore
+# Tüm projelerin csproj dosyalarını kopyala
+COPY ["services/auth-service/AuthService.Client/AuthService.Client.csproj", "services/auth-service/AuthService.Client/"]
+COPY ["services/auth-service/AuthService.Business/AuthService.Business.csproj", "services/auth-service/AuthService.Business/"]
+COPY ["services/auth-service/AuthService.Common/AuthService.Common.csproj", "services/auth-service/AuthService.Common/"]
+COPY ["services/auth-service/AuthService.Data/AuthService.Data.csproj", "services/auth-service/AuthService.Data/"]
+COPY ["services/auth-service/AuthService.Contract/AuthService.Contract.csproj", "services/auth-service/AuthService.Contract/"]
 
+# Restore solution
+RUN dotnet restore "services/auth-service/AuthService.Client/AuthService.Client.csproj"
+
+# Copy source code
 COPY . .
-RUN dotnet build -c Release -o /app/build
 
-FROM build AS publish
-RUN dotnet publish -c Release -o /app/publish
+# Build and publish
+WORKDIR "/src/services/auth-service/AuthService.Client"
+RUN dotnet publish "AuthService.Client.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-FROM base AS final
+# Final image
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
-COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "Webmts.AuthService.dll"]
+COPY --from=build /app/publish .
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "AuthService.Client.dll"]

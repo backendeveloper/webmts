@@ -8,6 +8,8 @@ Release/
 *.app
 *.log
 
+Migrations/
+
 # Kullanıcıya özgü ayar dosyaları
 *.user
 *.userdata

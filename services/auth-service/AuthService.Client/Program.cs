@@ -3,9 +3,11 @@ using AuthService.Client;
 using AuthService.Client.Middlewares;
 using AuthService.Common.Caching;
 using AuthService.Common.Logging;
+using AuthService.Data;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +31,11 @@ builder.Services.AddSingleton<TraceContext>();
 //     .CreateLogger();
 // builder.Host.UseSerilog();
 
+builder.Services.AddDbContext<AuthDbContext>(options =>
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        x => x.MigrationsAssembly("AuthService.Data")));
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -49,9 +56,8 @@ builder.Services.AddHealthChecks()
     .AddRedis(
         builder.Configuration.GetSection("CacheSettings:DistributedCache:ConnectionString").Value ?? string.Empty,
         name: "redis-check",
-        tags: new[] { "redis" }
+        tags: ["redis"]
     );
-
 
 var app = builder.Build();
 
