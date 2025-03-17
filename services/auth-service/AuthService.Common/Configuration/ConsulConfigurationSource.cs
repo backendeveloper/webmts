@@ -31,24 +31,24 @@ public class ConsulJsonConfigurationSource : IConfigurationSource
     {
         _logger.LogInformation("Building Consul JSON configuration provider for service {ServiceName} ({Environment})", 
             _serviceName, !string.IsNullOrEmpty(_environment) ? _environment : "default");
-        
+    
         var provider = new ConsulJsonConfigurationProvider(
             _consulClient, 
             _serviceName, 
             _environment, 
             _logger);
-        
+    
         if (_serviceProvider != null)
         {
             try
             {
                 var lifetime = _serviceProvider.GetService(typeof(IHostApplicationLifetime)) as IHostApplicationLifetime;
                 var configuration = _serviceProvider.GetService(typeof(IConfiguration)) as IConfiguration;
-                
+            
                 if (lifetime != null && configuration != null)
                 {
                     var watcherLogger = _serviceProvider.GetService(typeof(ILogger<ConsulRealTimeConfigWatcher>)) as ILogger<ConsulRealTimeConfigWatcher>;
-                    
+                
                     if (watcherLogger != null)
                     {
                         var watcher = new ConsulRealTimeConfigWatcher(
@@ -60,6 +60,8 @@ public class ConsulJsonConfigurationSource : IConfigurationSource
                             lifetime,
                             provider);
 
+                        // Ortama özgü watcher'ı başlat
+                        watcher.WatchEnvironmentSpecificConfig = true;
                         watcher.StartAsync(CancellationToken.None);
                     }
                 }
@@ -69,7 +71,7 @@ public class ConsulJsonConfigurationSource : IConfigurationSource
                 _logger.LogError(ex, "Error creating real-time Consul config watcher");
             }
         }
-        
+    
         return provider;
     }
 }

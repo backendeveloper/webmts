@@ -66,8 +66,10 @@ try
     var serviceName = initialConfig["Service:Name"] ?? "auth-service";
     var environment = builder.Environment.EnvironmentName;
     
+    // İlk olarak yapılandırmaları Consul'a senkronize et
     await initialConfig.SyncAppSettingsToConsulAsync(consulClient, serviceName, environment, logger);
     
+    // Sonra Consul'dan yapılandırmaları yükle
     builder.Configuration.AddConsulJsonConfiguration(
         consulClient, 
         serviceName, 

@@ -35,9 +35,24 @@ public class ConsulJsonConfigurationProvider : ConfigurationProvider
     {
         try
         {
-            await LoadConfigFileAsync("appsettings.json");
+            // Ana appsettings.json dosyasını yükle
+            var baseLoaded = await LoadConfigFileAsync("appsettings.json");
+        
+            // Eğer ortam belirtilmişse, ortama özgü yapılandırma dosyasını yükle
             if (!string.IsNullOrEmpty(_environment))
-                await LoadConfigFileAsync($"appsettings.{_environment}.json");
+            {
+                var envFileName = $"appsettings.{_environment}.json";
+                var envLoaded = await LoadConfigFileAsync(envFileName);
+            
+                if (envLoaded)
+                {
+                    _logger.LogInformation("Loaded environment specific configuration from Consul: {EnvFile}", envFileName);
+                }
+                else
+                {
+                    _logger.LogWarning("Environment specific configuration not found in Consul: {EnvFile}", envFileName);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -46,26 +61,52 @@ public class ConsulJsonConfigurationProvider : ConfigurationProvider
         }
     }
 
-    public async Task LoadConfigFileAsync(string configFileName)
+    public async Task<bool> LoadConfigFileAsync(string configFileName)
     {
         try
         {
             var consulKey = $"{_serviceName}/config/{configFileName}";
+            _logger.LogDebug("Loading configuration from Consul key: {ConsulKey}", consulKey);
+        
             var getPair = await _consulClient.KV.Get(consulKey);
             if (getPair.Response == null || getPair.Response.Value == null)
             {
                 _logger.LogWarning("Configuration file {ConfigFile} not found in Consul for service {ServiceName}",
                     configFileName, _serviceName);
-                return;
+                return false;
             }
 
             var jsonContent = Encoding.UTF8.GetString(getPair.Response.Value);
-            await LoadConfigFileAsync(configFileName, jsonContent);
+            await LoadConfigFileContentAsync(configFileName, jsonContent);
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error loading {ConfigFile} from Consul for service {ServiceName}",
                 configFileName, _serviceName);
+            return false;
+        }
+    }
+    
+    public async Task<bool> LoadConfigFileContentAsync(string configFileName, string jsonContent)
+    {
+        try
+        {
+            _loadedJsons[configFileName] = jsonContent;
+            _logger.LogDebug("Parsing JSON content for {ConfigFile}", configFileName);
+        
+            using var jsonDoc = JsonDocument.Parse(jsonContent);
+            FlattenJson(jsonDoc.RootElement, string.Empty);
+
+            _logger.LogInformation("Loaded configuration from {ConfigFile} in Consul for service {ServiceName}",
+                configFileName, _serviceName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error parsing JSON content for {ConfigFile} in service {ServiceName}",
+                configFileName, _serviceName);
+            return false;
         }
     }
 

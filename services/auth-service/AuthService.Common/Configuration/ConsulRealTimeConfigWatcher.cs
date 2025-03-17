@@ -15,6 +15,7 @@ public class ConsulRealTimeConfigWatcher : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly IHostApplicationLifetime _appLifetime;
     private readonly ConsulJsonConfigurationProvider _configProvider;
+    public bool WatchEnvironmentSpecificConfig { get; set; } = false;
 
     // Son işlenen değerleri takip etmek için
     private ulong _lastIndex = 0;
@@ -59,6 +60,7 @@ public class ConsulRealTimeConfigWatcher : BackgroundService
                     if (!string.IsNullOrEmpty(_environment))
                     {
                         files.Add($"appsettings.{_environment}.json");
+                        _logger.LogDebug("İzlenen environment dosyası: appsettings.{Environment}.json", _environment);
                     }
 
                     foreach (var file in files)
@@ -67,8 +69,7 @@ public class ConsulRealTimeConfigWatcher : BackgroundService
                         await CheckForChangesAsync(file, configIndexes, stoppingToken);
                     }
 
-                    // Kısa bir ara ver - bu sürekli polling'i simüle eder,
-                    // ancak Consul sınırlarını aşmaz
+                    // Kısa bir ara ver
                     await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -92,6 +93,7 @@ public class ConsulRealTimeConfigWatcher : BackgroundService
         CancellationToken stoppingToken)
     {
         var consulKey = $"{_serviceName}/config/{configFileName}";
+        _logger.LogDebug("Checking Consul key: {ConsulKey}", consulKey);
 
         try
         {
