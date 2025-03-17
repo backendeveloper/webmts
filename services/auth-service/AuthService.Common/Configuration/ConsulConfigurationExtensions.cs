@@ -1,6 +1,7 @@
 using System.Text;
 using Consul;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace AuthService.Common.Configuration;
@@ -23,6 +24,13 @@ public static class ConsulJsonConfigurationExtensions
             serviceProvider));
     }
 
+    public static IServiceCollection AddConsulConfigurationMonitoring(this IServiceCollection services)
+    {
+        services.AddHostedService<ConsulConfigurationMonitor>();
+        
+        return services;
+    }
+
     public static async Task SyncAppSettingsToConsulAsync(
         this IConfiguration configuration,
         IConsulClient consulClient,
@@ -32,44 +40,39 @@ public static class ConsulJsonConfigurationExtensions
     {
         try
         {
-            logger.LogInformation("Syncing appsettings JSON files to Consul for service {ServiceName}", serviceName);
+            logger.LogInformation(
+                "Syncing appsettings JSON files to Consul for service {ServiceName} (Env: {Environment})",
+                serviceName, environment);
 
             var basePath = AppDomain.CurrentDomain.BaseDirectory;
 
             var appSettingsPath = Path.Combine(basePath, "appsettings.json");
-            if (File.Exists(appSettingsPath))
-            {
+            if (File.Exists(appSettingsPath)) 
                 await SyncJsonFileToConsulAsync(consulClient, serviceName, "appsettings.json", appSettingsPath, logger);
-            }
 
             if (!string.IsNullOrEmpty(environment))
             {
                 var environmentSettingsPath = Path.Combine(basePath, $"appsettings.{environment}.json");
                 if (File.Exists(environmentSettingsPath))
                 {
-                    await SyncJsonFileToConsulAsync(consulClient, serviceName, $"appsettings.{environment}.json",
-                        environmentSettingsPath, logger);
+                    var envFileName = $"appsettings.{environment}.json";
+                    await SyncJsonFileToConsulAsync(consulClient, serviceName, envFileName, environmentSettingsPath,
+                        logger);
+                    logger.LogInformation("Ortam yapılandırması senkronize edildi: {EnvFile}", envFileName);
                 }
+                else
+                    logger.LogWarning("Ortam yapılandırma dosyası bulunamadı: {EnvFile}",
+                        $"appsettings.{environment}.json");
             }
 
-            var environments = new[] { "Development", "Staging", "Production" };
-            foreach (var env in environments.Where(e => e != environment))
-            {
-                var envSettingsPath = Path.Combine(basePath, $"appsettings.{env}.json");
-                if (File.Exists(envSettingsPath))
-                {
-                    await SyncJsonFileToConsulAsync(consulClient, serviceName, $"appsettings.{env}.json",
-                        envSettingsPath, logger);
-                }
-            }
-
-            await consulClient.KV.Put(new KVPair($"{serviceName}/config/_sync_completed")
+            var syncCompletedKey = $"{serviceName}/config/_sync_completed";
+            var syncCompletedPair = new KVPair(syncCompletedKey)
             {
                 Value = Encoding.UTF8.GetBytes(DateTime.UtcNow.ToString("o"))
-            });
+            };
+            await consulClient.KV.Put(syncCompletedPair);
 
-            logger.LogInformation("Completed syncing appsettings JSON files to Consul for service {ServiceName}",
-                serviceName);
+            logger.LogInformation("Yapılandırma dosyaları Consul'a başarıyla senkronize edildi");
         }
         catch (Exception ex)
         {

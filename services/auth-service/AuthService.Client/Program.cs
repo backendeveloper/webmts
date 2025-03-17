@@ -32,12 +32,6 @@ var initialConfig = new ConfigurationBuilder()
 AuthService.Client.Infrastructure.Logging.SerilogHelper.ConfigureLogging(initialConfig);
 builder.Host.UseSerilog();
 
-// builder.Configuration.Clear(); // TODO: burasi hata veriyor
-// builder.Configuration
-//     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-//     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
-//     .AddEnvironmentVariables();
-
 builder.Services.AddSingleton<IConsulClient>(_ => {
     var consulHost = initialConfig["Consul:Host"] ?? "consul";
     var consulPort = int.Parse(initialConfig["Consul:Port"] ?? "8500");
@@ -66,10 +60,8 @@ try
     var serviceName = initialConfig["Service:Name"] ?? "auth-service";
     var environment = builder.Environment.EnvironmentName;
     
-    // İlk olarak yapılandırmaları Consul'a senkronize et
     await initialConfig.SyncAppSettingsToConsulAsync(consulClient, serviceName, environment, logger);
     
-    // Sonra Consul'dan yapılandırmaları yükle
     builder.Configuration.AddConsulJsonConfiguration(
         consulClient, 
         serviceName, 
@@ -83,6 +75,7 @@ catch (Exception ex)
 {
     Console.WriteLine($"Consul'dan yapılandırma eklenirken hata: {ex.Message}");
 }
+builder.Services.AddConsulConfigurationMonitoring();
 
 try
 {
@@ -93,7 +86,7 @@ catch (Exception ex)
     Console.WriteLine($"Error loading configuration from Vault: {ex.Message}");
 }
 
-builder.Services.AddSingleton<IVaultClient>(provider =>
+builder.Services.AddSingleton<IVaultClient>(_ =>
 {
     var vaultUrl = builder.Configuration["Vault:Url"] ?? "http://vault:8200";
     var vaultToken = builder.Configuration["Vault:Token"] ?? "webmts-root-token";
@@ -128,48 +121,9 @@ builder.Services.AddWebMtsHealthChecks(builder.Configuration);
 
 builder.WebHost.ConfigureKestrel(options => { options.ListenAnyIP(8080); });
 
-// try
-// {
-//     var consulClient = builder.Services.BuildServiceProvider().GetRequiredService<IConsulClient>();
-//     var loggerFactory = builder.Services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
-//     var logger = loggerFactory.CreateLogger("ConsulConfiguration");
-//     var serviceName = initialConfig["Service:Name"] ?? "auth-service";
-//     var environment = builder.Environment.EnvironmentName;
-//
-//     // JSON dosyalarını Consul'a senkronize et
-//     await initialConfig.SyncAppSettingsToConsulAsync(consulClient, serviceName, environment, logger);
-//
-//     // Consul'dan JSON yapılandırmasını yükle
-//     builder.Configuration.AddConsulJsonConfiguration(consulClient, serviceName, environment, logger);
-//
-//     Console.WriteLine("Consul'dan JSON yapılandırması başarıyla eklendi");
-// }
-// catch (Exception ex)
-// {
-//     Console.WriteLine($"Consul'dan dinamik yapılandırma eklenirken hata: {ex.Message}");
-// }
-
 var app = builder.Build();
 
 await InitializeVaultAsync(app);
-
-// try
-// {
-//     var serviceName = initialConfig["Service:Name"] ?? "auth-service";
-//     var keyValueStore = app.Services.GetService<IKeyValueStore>();
-//
-//     if (keyValueStore != null)
-//     {
-//         // appsettings.json'ı Consul'a senkronize et
-//         await keyValueStore.SyncAllConfigurationsToConsulAsync(serviceName);
-//         app.Logger.LogInformation("appsettings.json yapılandırması Consul'a başarıyla senkronize edildi");
-//     }
-// }
-// catch (Exception ex)
-// {
-//     app.Logger.LogWarning("Consul yapılandırma senkronizasyonu başarısız: {ErrorMessage}", ex.Message);
-// }
-
 
 if (app.Environment.IsDevelopment())
 {

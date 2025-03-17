@@ -60,7 +60,6 @@ public class ConsulJsonConfigurationSource : IConfigurationSource
                             lifetime,
                             provider);
 
-                        // Ortama özgü watcher'ı başlat
                         watcher.WatchEnvironmentSpecificConfig = true;
                         watcher.StartAsync(CancellationToken.None);
                     }

@@ -15,9 +15,8 @@ public class ConsulRealTimeConfigWatcher : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly IHostApplicationLifetime _appLifetime;
     private readonly ConsulJsonConfigurationProvider _configProvider;
-    public bool WatchEnvironmentSpecificConfig { get; set; } = false;
+    public bool WatchEnvironmentSpecificConfig { get; set; }
 
-    // Son işlenen değerleri takip etmek için
     private ulong _lastIndex = 0;
 
     public ConsulRealTimeConfigWatcher(
@@ -40,22 +39,18 @@ public class ConsulRealTimeConfigWatcher : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Uygulama başlangıcı için biraz bekleyelim
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
         _logger.LogInformation("Consul gerçek zamanlı yapılandırma izleyicisi başlatıldı");
 
-        // Her bir yapılandırma dosyası için son indeksleri izliyoruz
         var configIndexes = new Dictionary<string, ulong>();
 
         try
         {
-            // Uygulamanın durdurulmasına kadar değişiklikleri izle
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    // Tüm yapılandırma dosyalarını kontrol edelim
                     var files = new List<string> { "appsettings.json" };
                     if (!string.IsNullOrEmpty(_environment))
                     {
@@ -63,13 +58,9 @@ public class ConsulRealTimeConfigWatcher : BackgroundService
                         _logger.LogDebug("İzlenen environment dosyası: appsettings.{Environment}.json", _environment);
                     }
 
-                    foreach (var file in files)
-                    {
-                        // Her dosyayı kontrol et
+                    foreach (var file in files) 
                         await CheckForChangesAsync(file, configIndexes, stoppingToken);
-                    }
 
-                    // Kısa bir ara ver
                     await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -126,32 +117,6 @@ public class ConsulRealTimeConfigWatcher : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Yapılandırma dosyası kontrolü sırasında hata: {ConfigFile}", configFileName);
-        }
-    }
-
-    private async Task WatchConfigFileAsync(string configFileName, CancellationToken stoppingToken)
-    {
-        var consulKey = $"{_serviceName}/config/{configFileName}";
-
-        var queryOptions = new QueryOptions
-        {
-            WaitIndex = _lastIndex,
-            WaitTime = TimeSpan.FromMinutes(5)
-        };
-
-        var response = await _consulClient.KV.Get(consulKey, queryOptions, stoppingToken);
-        if (response.LastIndex > _lastIndex && response.Response != null)
-        {
-            _lastIndex = response.LastIndex;
-
-            var jsonContent = Encoding.UTF8.GetString(response.Response.Value);
-            _logger.LogInformation("Consul'da yapılandırma değişikliği tespit edildi: {ConfigFile}", configFileName);
-
-            await _configProvider.LoadConfigFileAsync(configFileName, jsonContent);
-
-            _configProvider.TriggerReload();
-
-            _logger.LogInformation("Yapılandırma gerçek zamanlı olarak güncellendi: {ConfigFile}", configFileName);
         }
     }
 }
