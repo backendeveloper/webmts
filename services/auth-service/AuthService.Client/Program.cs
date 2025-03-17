@@ -1,35 +1,71 @@
 using System.Text.Json;
 using AuthService.Client;
+using AuthService.Client.Infrastructure.Consul;
+using AuthService.Client.Infrastructure.HealthChecks;
+using AuthService.Client.Infrastructure.Vault;
 using AuthService.Client.Middlewares;
 using AuthService.Common.Caching;
 using AuthService.Common.Logging;
 using AuthService.Data;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
+using Consul;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Serilog;
+using VaultSharp;
+using VaultSharp.V1.AuthMethods.Token;
+using HealthStatus = Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var initialConfig = new ConfigurationBuilder()
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables()
+    .Build();
+
+// builder.Configuration.Clear(); // TODO: burasi hata veriyor
 builder.Configuration
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true);
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables();
 
-// builder.Configuration.AddConsulConfiguration();
-// builder.Services.AddConsulServices(builder.Configuration);
+try
+{
+    await builder.Configuration.AddVaultConfiguration(initialConfig);
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Error loading configuration from Vault: {ex.Message}");
+    // Hata durumunda devam et, varsayılan yapılandırma kullanılacak
+}
+
+AuthService.Client.Infrastructure.Logging.SerilogHelper.ConfigureLogging(builder.Configuration);
+builder.Host.UseSerilog();
+
+builder.Services.AddSingleton<IConsulClient>(provider => new ConsulClient(config =>
+{
+    var consulHost = builder.Configuration["Consul:Host"] ?? "consul";
+    var consulPort = int.Parse(builder.Configuration["Consul:Port"] ?? "8500");
+    config.Address = new Uri($"http://{consulHost}:{consulPort}");
+}));
+builder.Services.AddSingleton<IServiceRegistration, ConsulServiceRegistration>();
+
+builder.Services.AddSingleton<IVaultClient>(provider => {
+    var vaultUrl = builder.Configuration["Vault:Url"] ?? "http://vault:8200";
+    var vaultToken = builder.Configuration["Vault:Token"] ?? "webmts-root-token";
+    
+    var tokenAuthMethod = new TokenAuthMethodInfo(vaultToken);
+    var vaultClientSettings = new VaultClientSettings(vaultUrl, tokenAuthMethod);
+    
+    return new VaultClient(vaultClientSettings);
+});
+builder.Services.AddSingleton<ISecretManager, VaultSecretManager>();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCachingServices(builder.Configuration);
 builder.Services.AddSingleton<TraceContext>();
-
-// Log.Logger = new LoggerConfiguration()
-//     .ReadFrom.Configuration(builder.Configuration)
-//     .Filter.ByExcluding(Matching.FromSource("Microsoft.AspNetCore.Diagnostics.DeveloperExceptionPageMiddleware"))
-//     .Filter.ByExcluding(Matching.FromSource("Microsoft.AspNetCore.Server.Kestrel"))
-//     .Enrich.WithProperty("Application", "Kazan.API")
-//     .CreateLogger();
-// builder.Host.UseSerilog();
 
 builder.Services.AddDbContext<AuthDbContext>(options =>
     options.UseNpgsql(
@@ -46,18 +82,7 @@ builder.Host.ConfigureContainer<ContainerBuilder>(containerBuilder =>
     containerBuilder.RegisterModule<ClientModule>();
 });
 
-builder.Services.AddHealthChecks()
-    .AddCheck("self", () => HealthCheckResult.Healthy())
-    .AddNpgSql(
-        builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty,
-        name: "authdb-check",
-        tags: ["authdb"]
-    )
-    .AddRedis(
-        builder.Configuration.GetSection("CacheSettings:DistributedCache:ConnectionString").Value ?? string.Empty,
-        name: "redis-check",
-        tags: ["redis"]
-    );
+builder.Services.AddWebMtsHealthChecks(builder.Configuration);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
@@ -66,10 +91,22 @@ builder.WebHost.ConfigureKestrel(options =>
 
 var app = builder.Build();
 
+await InitializeVaultAsync(app);
+
+app.Services.GetRequiredService<IServiceRegistration>().RegisterService(
+    new ConsulRegistrationInfo
+    {
+        ServiceId = "auth-service-" + Guid.NewGuid().ToString(),
+        ServiceName = "auth-service",
+        ServiceAddress = app.Configuration["ServiceSettings:ServiceAddress"] ?? "auth-service",
+        ServicePort = 8080,
+        HealthCheckEndpoint = "api/auth/health"
+    });
+
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger(c => { c.RouteTemplate = "api/auth/swagger/{documentName}/swagger.json"; });
-
     app.UseSwaggerUI(c =>
     {
         c.RoutePrefix = "api/auth/swagger";
@@ -77,7 +114,7 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// app.UseHttpsRedirection();
+app.UseMiddleware<ApiTraceMiddleware>();
 app.UseMiddleware<TraceMiddleware>();
 app.UseAuthorization();
 
@@ -111,3 +148,34 @@ app.MapGet("/api/auth", () => "Auth Service is running!");
 app.MapControllers();
 
 app.Run();
+
+async Task InitializeVaultAsync(WebApplication app)
+{
+    try
+    {
+        var secretManager = app.Services.GetRequiredService<ISecretManager>();
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        
+        var jwtKey = builder.Configuration["Jwt:Key"];
+        if (!string.IsNullOrEmpty(jwtKey))
+        {
+            await secretManager.SetSecretAsync("webmts/auth/jwt", new Dictionary<string, object?>
+            {
+                { "key", jwtKey }
+            });
+            logger.LogInformation("JWT key stored in Vault");
+        }
+        
+        await secretManager.SetSecretAsync("webmts/auth/db", new Dictionary<string, object?>
+        {
+            { "connectionString", builder.Configuration.GetConnectionString("DefaultConnection") }
+        });
+        
+        logger.LogInformation("Vault initialized with secrets");
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Error initializing Vault");
+    }
+}

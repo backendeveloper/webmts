@@ -52,6 +52,76 @@ services:
       - "traefik.http.services.auth-svc.loadbalancer.server.port=8080"
     networks:
       - webmts-network
+  
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
+    container_name: webmts-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - webmts-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9200" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.2
+    container_name: webmts-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - webmts-network
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5601/api/status" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: webmts-consul
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    command: "agent -dev -client=0.0.0.0 -ui"
+    networks:
+      - webmts-network
+    healthcheck:
+      test: [ "CMD", "consul", "info" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      
+  vault:
+    image: hashicorp/vault:1.16
+    container_name: webmts-vault
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=webmts-root-token
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - webmts-network
+    healthcheck:
+      test: [ "CMD", "vault", "status" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   auth-db:
     image: postgres:16-alpine
@@ -178,3 +248,4 @@ volumes:
   customer-db-data:
   transaction-db-data:
   notification-db-data:
+  elasticsearch-data:
