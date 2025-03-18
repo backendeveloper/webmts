@@ -11,6 +11,7 @@ public class DataModule : Module
         builder.RegisterType<UserRepository>().As<IUserRepository>().InstancePerLifetimeScope();
         builder.RegisterType<RefreshTokenRepository>().As<IRefreshTokenRepository>().InstancePerLifetimeScope();
         builder.RegisterType<RoleRepository>().As<IRoleRepository>().InstancePerLifetimeScope();
+        builder.RegisterType<UserRoleRepository>().As<IUserRoleRepository>().InstancePerLifetimeScope();
 
         builder.RegisterType<UnitOfWork>().As<IUnitOfWork>().InstancePerLifetimeScope();
     }
