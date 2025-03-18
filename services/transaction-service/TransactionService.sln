@@ -3,8 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransactionService.Client", "TransactionService.Client\TransactionService.Client.csproj", "{9EA43C31-B0ED-44D3-AA82-7B72C2A076B8}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransactionService.Contract", "TransactionService.Contract\TransactionService.Contract.csproj", "{2A3C831D-41AD-4C1B-89E6-28BD11DEBF9C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransactionService.Business", "TransactionService.Business\TransactionService.Business.csproj", "{8E3F974F-602E-4E17-A0A1-0AEEFEFF14B6}"
@@ -15,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransactionService.Data", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransactionService.Test", "TransactionService.Test\TransactionService.Test.csproj", "{6C8E78C6-F709-451A-A9CF-670BD8AACC3B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransactionService.Client", "TransactionService.Client\TransactionService.Client.csproj", "{48221582-8A38-42EC-8E0A-1D165A3EB2DF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,10 +24,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{9EA43C31-B0ED-44D3-AA82-7B72C2A076B8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{9EA43C31-B0ED-44D3-AA82-7B72C2A076B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{9EA43C31-B0ED-44D3-AA82-7B72C2A076B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{9EA43C31-B0ED-44D3-AA82-7B72C2A076B8}.Release|Any CPU.Build.0 = Release|Any CPU
 		{2A3C831D-41AD-4C1B-89E6-28BD11DEBF9C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{2A3C831D-41AD-4C1B-89E6-28BD11DEBF9C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2A3C831D-41AD-4C1B-89E6-28BD11DEBF9C}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -48,5 +44,9 @@ Global
 		{6C8E78C6-F709-451A-A9CF-670BD8AACC3B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6C8E78C6-F709-451A-A9CF-670BD8AACC3B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6C8E78C6-F709-451A-A9CF-670BD8AACC3B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{48221582-8A38-42EC-8E0A-1D165A3EB2DF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{48221582-8A38-42EC-8E0A-1D165A3EB2DF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{48221582-8A38-42EC-8E0A-1D165A3EB2DF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{48221582-8A38-42EC-8E0A-1D165A3EB2DF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
