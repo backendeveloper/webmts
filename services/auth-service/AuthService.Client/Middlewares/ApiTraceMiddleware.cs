@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 using AuthService.Common.Logging;
 
 namespace AuthService.Client.Middlewares;
@@ -22,13 +21,26 @@ public class ApiTraceMiddleware
         var requestMethod = context.Request.Method;
         var requestTime = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
-        
-        // Trace ID'yi ayarla
+
+        // Set trace ID
         context.Items["TraceId"] = traceId;
         context.Response.Headers.Append("X-Trace-Id", traceId);
         traceContext.TraceId = traceId;
 
-        // İstek gövdesini oku (gerekiyorsa)
+        // Add correlation ID if present in the request headers
+        var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault() ?? Guid.NewGuid().ToString();
+        context.Response.Headers.Append("X-Correlation-ID", correlationId);
+
+        // Log the request
+        using var loggingScope = _logger.BeginScope(new Dictionary<string, object>
+        {
+            ["TraceId"] = traceId,
+            ["CorrelationId"] = correlationId,
+            ["RequestPath"] = requestPath,
+            ["RequestMethod"] = requestMethod
+        });
+
+        // Capture request body if needed
         string requestBody = string.Empty;
         if (context.Request.ContentLength > 0 && ShouldCaptureRequestBody(context))
         {
@@ -36,86 +48,68 @@ public class ApiTraceMiddleware
             using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
             requestBody = await reader.ReadToEndAsync();
             context.Request.Body.Position = 0;
+
+            // Add structured logging info but sanitize sensitive data
+            _logger.LogInformation("Request {Method} {Path} started. Body: {RequestBody}",
+                requestMethod, requestPath, SanitizeJson(requestBody));
+        }
+        else
+        {
+            _logger.LogInformation("Request {Method} {Path} started",
+                requestMethod, requestPath);
         }
 
-        // Orijinal response body stream'ini kaydet
+        // Save original response body stream
         var originalBodyStream = context.Response.Body;
         using var responseBodyStream = new MemoryStream();
         context.Response.Body = responseBodyStream;
-        
+
         try
         {
-            // Bir sonraki middleware'i çağır
+            // Call the next middleware
             await _next(context);
-            
+
             stopwatch.Stop();
-            
-            // Response body'yi oku
+
+            // Read response body
             responseBodyStream.Seek(0, SeekOrigin.Begin);
             var responseBody = await new StreamReader(responseBodyStream).ReadToEndAsync();
             responseBodyStream.Seek(0, SeekOrigin.Begin);
-            
-            // Orijinal stream'e response'u yaz
+
+            // Copy back to original stream
             await responseBodyStream.CopyToAsync(originalBodyStream);
-            
-            // Detayları logla (hata olmayan durumlar için)
-            LogApiTrace(traceId, requestPath, requestMethod, requestTime, stopwatch.ElapsedMilliseconds,
-                context.Response.StatusCode, requestBody, 
-                ShouldCaptureResponseBody(context) ? responseBody : string.Empty);
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            
-            // Hatayı logla
-            _logger.LogError(ex, "Request {Method} {Path} with TraceId {TraceId} failed after {ElapsedMs}ms",
-                requestMethod, requestPath, traceId, stopwatch.ElapsedMilliseconds);
-            
-            // Orijinal response body stream'ini geri yükle
-            context.Response.Body = originalBodyStream;
-            
-            // Hata fırlat
-            throw;
-        }
-        finally
-        {
-            // Eğer stream değiştirilirse, orijinal stream'e geri döndür
-            if (context.Response.Body != originalBodyStream)
+
+            // Log response with structured logging
+            _logger.LogInformation(
+                "Request {Method} {Path} completed in {ElapsedMilliseconds}ms with status {StatusCode}",
+                requestMethod, requestPath, stopwatch.ElapsedMilliseconds, context.Response.StatusCode);
+
+            // Only log response body for non-success statuses or if it's useful for debugging
+            if (context.Response.StatusCode >= 400 && ShouldCaptureResponseBody(context))
             {
-                context.Response.Body = originalBodyStream;
+                _logger.LogDebug(
+                    "Response for {Method} {Path}: Body: {ResponseBody}",
+                    requestMethod, requestPath, SanitizeJson(responseBody));
             }
         }
-    }
-
-    private void LogApiTrace(string traceId, string path, string method, DateTime requestTime, long elapsedMs,
-        int statusCode, string requestBody, string responseBody)
-    {
-        // Loglama için JSON obje oluştur
-        var apiTrace = new
+        catch (Exception)
         {
-            TraceId = traceId,
-            Path = path,
-            Method = method,
-            RequestTime = requestTime,
-            ElapsedMilliseconds = elapsedMs,
-            StatusCode = statusCode,
-            RequestBody = SanitizeJson(requestBody),
-            ResponseBody = SanitizeJson(responseBody)
-        };
-
-        _logger.LogInformation("API Trace: {ApiTrace}", JsonSerializer.Serialize(apiTrace));
+            // Exception is handled by the GlobalExceptionMiddleware, so just restore the original body
+            context.Response.Body = originalBodyStream;
+            throw; // Rethrow to be handled by GlobalExceptionMiddleware
+        }
     }
 
     private bool ShouldCaptureRequestBody(HttpContext context)
     {
-        // Content type'a göre request body'nin yakalanıp yakalanmayacağına karar ver
+        // Content type based decision
         var contentType = context.Request.ContentType?.ToLower() ?? string.Empty;
         return contentType.Contains("application/json") || contentType.Contains("application/xml");
     }
 
     private bool ShouldCaptureResponseBody(HttpContext context)
     {
-        // Content type'a göre response body'nin yakalanıp yakalanmayacağına karar ver
+        // Content type based decision
         var contentType = context.Response.ContentType?.ToLower() ?? string.Empty;
         return contentType.Contains("application/json") || contentType.Contains("application/xml");
     }
@@ -126,17 +120,33 @@ public class ApiTraceMiddleware
 
         try
         {
-            // Hassas verileri (şifre, token vb.) gizle
-            var sanitized = json.Replace("\"password\":", "\"password\":\"[REDACTED]\"")
-                              .Replace("\"Password\":", "\"Password\":\"[REDACTED]\"")
-                              .Replace("\"accessToken\":", "\"accessToken\":\"[REDACTED]\"")
-                              .Replace("\"refreshToken\":", "\"refreshToken\":\"[REDACTED]\"");
-            
+            // Sanitize sensitive data using regex patterns
+            var sensitiveFields = new[]
+            {
+                "password", "Password",
+                "token", "Token",
+                "accessToken", "refreshToken",
+                "secret", "apiKey",
+                "creditCard", "cardNumber",
+                "ssn", "socialSecurity"
+            };
+
+            var sanitized = json;
+            foreach (var field in sensitiveFields)
+            {
+                // Simple pattern matching for JSON field values
+                var pattern = $"\"{field}\"\\s*:\\s*\"[^\"]+\"";
+                var replacement = $"\"{field}\":\"[REDACTED]\"";
+                sanitized = System.Text.RegularExpressions.Regex.Replace(
+                    sanitized, pattern, replacement,
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+
             return sanitized;
         }
         catch
         {
-            return json;
+            return "[Unable to sanitize JSON]";
         }
     }
 }

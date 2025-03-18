@@ -2,6 +2,7 @@ using System.Text.Json;
 using AuthService.Client;
 using AuthService.Client.Infrastructure.Consul;
 using AuthService.Client.Infrastructure.HealthChecks;
+using AuthService.Client.Infrastructure.Logging;
 using AuthService.Client.Infrastructure.Vault;
 using AuthService.Client.Middlewares;
 using AuthService.Common.Caching;
@@ -97,10 +98,12 @@ builder.Services.AddSingleton<IVaultClient>(_ =>
     return new VaultClient(vaultClientSettings);
 });
 builder.Services.AddSingleton<ISecretManager, VaultSecretManager>();
-
+builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCachingServices(builder.Configuration);
 builder.Services.AddSingleton<TraceContext>();
+
+builder.Services.AddHostedService<KibanaIndexInitializer>();
 
 builder.Services.AddDbContext<AuthDbContext>(options =>
     options.UseNpgsql(
@@ -135,6 +138,7 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+app.UseGlobalExceptionHandler();
 app.UseMiddleware<ApiTraceMiddleware>();
 app.UseMiddleware<TraceMiddleware>();
 app.UseAuthorization();

@@ -21,6 +21,8 @@
       <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.3" />
       <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.3" />
       <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.3" />
+      <PackageReference Include="Serilog" Version="4.2.0" />
+      <PackageReference Include="Serilog.Sinks.Elasticsearch" Version="10.0.0" />
       <PackageReference Include="StackExchange.Redis" Version="2.8.31" />
       <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
       <PackageReference Include="Consul" Version="1.7.14.7" />
