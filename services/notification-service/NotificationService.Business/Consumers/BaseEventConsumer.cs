@@ -1,6 +1,5 @@
 using System.Text.Json;
 using MediatR;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -17,7 +16,7 @@ public abstract class BaseEventConsumer : BackgroundService
         protected readonly ILogger<BaseEventConsumer> _logger;
         protected readonly RabbitMQSettings _rabbitMQSettings;
         protected IConnection _connection;
-        protected IModel _channel;
+        protected IChannel _channel;
         protected string _queueName;
 
         public BaseEventConsumer(
@@ -29,7 +28,7 @@ public abstract class BaseEventConsumer : BackgroundService
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _rabbitMQSettings = options?.Value ?? throw new ArgumentNullException(nameof(options));
             
-            InitializeRabbitMQConnection();
+            InitializeRabbitMQConnection().GetAwaiter().GetResult();
         }
 
         protected async Task InitializeRabbitMQConnection()
@@ -42,13 +41,12 @@ public abstract class BaseEventConsumer : BackgroundService
                     Port = _rabbitMQSettings.Port,
                     UserName = _rabbitMQSettings.UserName,
                     Password = _rabbitMQSettings.Password,
-                    VirtualHost = _rabbitMQSettings.VirtualHost
+                    VirtualHost = _rabbitMQSettings.VirtualHost ?? "/"
                 };
 
                 _connection = await factory.CreateConnectionAsync();
-                _channel = _connection.CreateModel();
-                
-                _channel.ExchangeDeclare(
+                _channel = await _connection.CreateChannelAsync();
+                await _channel.ExchangeDeclareAsync(
                     exchange: _rabbitMQSettings.ExchangeName, 
                     type: ExchangeType.Topic,
                     durable: true,

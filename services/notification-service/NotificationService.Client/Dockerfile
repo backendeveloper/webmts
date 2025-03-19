@@ -1,23 +1,21 @@
-﻿FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-USER $APP_UID
-WORKDIR /app
-EXPOSE 8080
-EXPOSE 8081
-
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-ARG BUILD_CONFIGURATION=Release
+﻿FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["NotificationService.Client/NotificationService.Client.csproj", "NotificationService.Client/"]
-RUN dotnet restore "NotificationService.Client/NotificationService.Client.csproj"
+
+COPY ["services/notification-service/NotificationService.Client/NotificationService.Client.csproj", "services/notification-service/NotificationService.Client/"]
+COPY ["services/notification-service/NotificationService.Business/NotificationService.Business.csproj", "services/notification-service/NotificationService.Business/"]
+COPY ["services/notification-service/NotificationService.Common/NotificationService.Common.csproj", "services/notification-service/NotificationService.Common/"]
+COPY ["services/notification-service/NotificationService.Data/NotificationService.Data.csproj", "services/notification-service/NotificationService.Data/"]
+COPY ["services/notification-service/NotificationService.Contract/NotificationService.Contract.csproj", "services/notification-service/NotificationService.Contract/"]
+
+RUN dotnet restore "services/notification-service/NotificationService.Client/NotificationService.Client.csproj"
+
 COPY . .
-WORKDIR "/src/NotificationService.Client"
-RUN dotnet build "NotificationService.Client.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
-FROM build AS publish
-ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "NotificationService.Client.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+WORKDIR "/src/services/notification-service/NotificationService.Client"
+RUN dotnet publish "NotificationService.Client.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-FROM base AS final
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
-COPY --from=publish /app/publish .
+COPY --from=build /app/publish .
+EXPOSE 8080
 ENTRYPOINT ["dotnet", "NotificationService.Client.dll"]

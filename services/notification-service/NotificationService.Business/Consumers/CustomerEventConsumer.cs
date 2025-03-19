@@ -7,6 +7,7 @@ using NotificationService.Common.Configuration;
 using NotificationService.Contract.Enums;
 using NotificationService.Contract.Events;
 using NotificationService.Contract.Requests;
+using RabbitMQ.Client.Events;
 
 namespace NotificationService.Business.Consumers;
 
@@ -18,17 +19,15 @@ public class CustomerEventConsumer : BaseEventConsumer
             ILogger<CustomerEventConsumer> logger) 
             : base(options, serviceScopeFactory, logger)
         {
-            // Queue'yu oluştur
             _queueName = $"{_rabbitMQSettings.QueueName}.customer";
             
-            _channel.QueueDeclare(
+            _channel.QueueDeclareAsync(
                 queue: _queueName,
                 durable: true,
                 exclusive: false,
                 autoDelete: false);
             
-            // Exchange'e bağla (routing key olarak customer.* kullan)
-            _channel.QueueBind(
+            _channel.QueueBindAsync(
                 queue: _queueName,
                 exchange: _rabbitMQSettings.ExchangeName,
                 routingKey: "customer.*");
@@ -43,9 +42,8 @@ public class CustomerEventConsumer : BaseEventConsumer
             stoppingToken.Register(() => 
                 _logger.LogInformation("Customer event consumer is stopping"));
 
-            var consumer = new EventingBasicConsumer(_channel);
-            
-            consumer.Received += async (_, ea) =>
+            var consumer = new AsyncEventingBasicConsumer(_channel);
+            consumer.ReceivedAsync += async (_, ea) =>
             {
                 var body = ea.Body.ToArray();
                 var message = Encoding.UTF8.GetString(body);
@@ -55,55 +53,41 @@ public class CustomerEventConsumer : BaseEventConsumer
                 
                 try
                 {
-                    // Routing key'e göre uygun event handler'ı seç
-                    if (routingKey == "customer.created")
-                    {
+                    if (routingKey == "customer.created") 
                         await ProcessEventAsync<CustomerCreatedEvent>(message);
-                    }
                     
-                    // İşlem başarılı, mesajı onayla
-                    _channel.BasicAck(ea.DeliveryTag, false);
+                    await _channel.BasicAckAsync(ea.DeliveryTag, false, stoppingToken);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, $"Error processing message with routing key: {routingKey}");
-                    
-                    // İşlem başarısız, mesajı reddet (requeue: true ile yeniden kuyruğa eklenir)
-                    _channel.BasicNack(ea.DeliveryTag, false, true);
+                    await _channel.BasicAckAsync(ea.DeliveryTag, false, stoppingToken);
                 }
             };
             
-            _channel.BasicConsume(
-                queue: _queueName,
-                autoAck: false,
-                consumer: consumer);
+            await _channel.BasicConsumeAsync(_queueName, false, null, false, false, null, consumer,
+                cancellationToken: stoppingToken);
             
-            while (!stoppingToken.IsCancellationRequested)
-            {
+            while (!stoppingToken.IsCancellationRequested) 
                 await Task.Delay(1000, stoppingToken);
-            }
         }
 
         protected override async Task HandleEventAsync<TEvent>(TEvent @event, IMediator mediator)
         {
-            if (@event is CustomerCreatedEvent customerCreatedEvent)
-            {
+            if (@event is CustomerCreatedEvent customerCreatedEvent) 
                 await HandleCustomerCreatedEventAsync(customerCreatedEvent, mediator);
-            }
         }
 
         private async Task HandleCustomerCreatedEventAsync(CustomerCreatedEvent @event, IMediator mediator)
         {
-            _logger.LogInformation($"Handling CustomerCreatedEvent for customer {@@event.CustomerId}");
+            _logger.LogInformation($"Handling CustomerCreatedEvent for customer {@event.CustomerId}");
             
-            // Şablon verilerini hazırla
             var templateData = new Dictionary<string, string>
             {
                 { "CustomerId", @event.CustomerId },
                 { "CustomerName", @event.CustomerName }
             };
             
-            // Bildirim isteği oluştur
             var notificationCommand = new SendNotificationRequest
             {
                 Type = NotificationType.Email,
@@ -115,7 +99,6 @@ public class CustomerEventConsumer : BaseEventConsumer
                 RelatedEntityType = "Customer"
             };
             
-            // Bildirimi gönder
             await mediator.Send(notificationCommand);
         }
     }

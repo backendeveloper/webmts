@@ -107,6 +107,16 @@ services:
       timeout: 10s
       retries: 5
       
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "check_port_connectivity" ]
+    networks:
+      - webmts-network
+      
   auth-service:
     build:
       context: .
@@ -227,43 +237,44 @@ services:
     networks:
       - webmts-network
 
-  # Notification Service
   notification-service:
     build:
-      context: ./services/notification-service/Webmts.NotificationService
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/notification-service/NotificationService.Client/Dockerfile
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
       - ConnectionStrings__DefaultConnection=Host=notification-db;Database=notification_db;Username=postgres;Password=postgres
+    ports:
+      - "8084:8080"
     depends_on:
-      - notification-db
-      - rabbitmq
+      auth-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.notification.rule=PathPrefix(`/api/notification`)"
-      - "traefik.http.services.notification.loadbalancer.server.port=8080"
+      - "traefik.http.routers.notification-router.rule=PathPrefix(`/api/notification`)"
+      - "traefik.http.routers.notification.service=notification-svc"
+      - "traefik.http.services.notification-svc.loadbalancer.server.port=8080"
     networks:
       - webmts-network
 
   notification-db:
-    image: postgres:15
+    image: postgres:16-alpine
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=notification_db
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d notification_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     volumes:
       - notification-db-data:/var/lib/postgresql/data
-    networks:
-      - webmts-network
-
-  # RabbitMQ for async communication
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    healthcheck:
-      test: [ "CMD", "rabbitmq-diagnostics", "check_port_connectivity" ]
     networks:
       - webmts-network
 
