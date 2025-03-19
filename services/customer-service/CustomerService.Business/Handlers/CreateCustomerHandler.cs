@@ -1,3 +1,4 @@
+using CustomerService.Business.Events;
 using CustomerService.Common.Exceptions;
 using CustomerService.Contract.Requests;
 using CustomerService.Contract.Responses;
@@ -12,13 +13,16 @@ public class CreateCustomerHandler : IRequestHandler<CreateCustomerRequest, Crea
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CreateCustomerHandler> _logger;
+    private readonly IEventBus _eventBus;
 
     public CreateCustomerHandler(
         IUnitOfWork unitOfWork,
-        ILogger<CreateCustomerHandler> logger)
+        ILogger<CreateCustomerHandler> logger,
+        IEventBus eventBus)
     {
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _eventBus = eventBus;
     }
 
     public async Task<CreateCustomerResponse> Handle(CreateCustomerRequest request, CancellationToken cancellationToken)
@@ -26,22 +30,18 @@ public class CreateCustomerHandler : IRequestHandler<CreateCustomerRequest, Crea
         try
         {
             if (await _unitOfWork.Customers.AnyAsync(u => u.Username == request.Username))
-            {
                 return new CreateCustomerResponse
                 {
                     Success = false,
                     Message = "Username is already taken"
                 };
-            }
 
             if (await _unitOfWork.Customers.AnyAsync(u => u.Email == request.Email))
-            {
                 return new CreateCustomerResponse
                 {
                     Success = false,
                     Message = "Email is already registered"
                 };
-            }
 
             await _unitOfWork.BeginTransactionAsync();
 
@@ -59,6 +59,17 @@ public class CreateCustomerHandler : IRequestHandler<CreateCustomerRequest, Crea
                 await _unitOfWork.CompleteAsync();
                 await _unitOfWork.CommitTransactionAsync();
 
+                var customerCreatedEvent = new CustomerCreatedEvent
+                {
+                    CustomerId = newUser.Id.ToString(),
+                    CustomerName = newUser.Username,
+                    CustomerEmail = newUser.Email,
+                    CustomerPhone = ""
+                };
+
+                _eventBus.Publish(customerCreatedEvent);
+                _logger.LogInformation("Published CustomerCreatedEvent for customer {CustomerId}", newUser.Id);
+                
                 return new CreateCustomerResponse
                 {
                     Success = true,

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using Consul;
+using CustomerService.Business.Events;
 using CustomerService.Client;
 using CustomerService.Client.Infrastructure.Consul;
 using CustomerService.Client.Infrastructure.HealthChecks;
@@ -107,6 +108,8 @@ builder.Services.AddDbContext<CustomerDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("DefaultConnection"),
         x => x.MigrationsAssembly("CustomerService.Data")));
+
+builder.Services.Configure<RabbitMQSettings>(builder.Configuration.GetSection("RabbitMQ"));
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

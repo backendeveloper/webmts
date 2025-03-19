@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NotificationService.Common.Configuration;
 
 public class RabbitMQSettings
@@ -9,4 +11,7 @@ public class RabbitMQSettings
     public string VirtualHost { get; set; }
     public string ExchangeName { get; set; }
     public string QueueName { get; set; }
+    
+    [JsonIgnore]
+    public string ConnectionString => $"amqp://{UserName}:{Password}@{HostName}:{Port}/{VirtualHost}";
 }

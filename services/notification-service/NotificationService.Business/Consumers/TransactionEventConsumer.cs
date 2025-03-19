@@ -21,16 +21,16 @@ public class TransactionEventConsumer : BaseEventConsumer
     {
         _queueName = $"{_rabbitMQSettings.QueueName}.transaction";
 
-        _channel.QueueDeclareAsync(
+        _model.QueueDeclare(
             queue: _queueName,
             durable: true,
             exclusive: false,
-            autoDelete: false);
+            autoDelete: false, null);
 
-        _channel.QueueBindAsync(
+        _model.QueueBind(
             queue: _queueName,
             exchange: _rabbitMQSettings.ExchangeName,
-            routingKey: "transaction.*");
+            routingKey: "transaction.*", null);
 
         _logger.LogInformation($"Transaction event consumer initialized, queue: {_queueName}");
     }
@@ -42,8 +42,8 @@ public class TransactionEventConsumer : BaseEventConsumer
         stoppingToken.Register(() =>
             _logger.LogInformation("Transaction event consumer is stopping"));
 
-        var consumer = new AsyncEventingBasicConsumer(_channel);
-        consumer.ReceivedAsync += async (_, ea) =>
+        var consumer = new AsyncEventingBasicConsumer(_model);
+        consumer.Received += async (_, ea) =>
         {
             var body = ea.Body.ToArray();
             var message = Encoding.UTF8.GetString(body);
@@ -58,19 +58,18 @@ public class TransactionEventConsumer : BaseEventConsumer
                 else if (routingKey == "transaction.status-changed")
                     await ProcessEventAsync<TransactionStatusChangedEvent>(message);
 
-                await _channel.BasicAckAsync(ea.DeliveryTag, false, stoppingToken);
+                _model.BasicAck(ea.DeliveryTag, false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error processing message with routing key: {routingKey}");
-                await _channel.BasicAckAsync(ea.DeliveryTag, false, stoppingToken);
+                _model.BasicAck(ea.DeliveryTag, false);
             }
         };
 
-        await _channel.BasicConsumeAsync(_queueName, false, null, false, false, null, consumer,
-            cancellationToken: stoppingToken);
+        _model.BasicConsume(_queueName, false, null, false, false, null, consumer);
 
-        while (!stoppingToken.IsCancellationRequested) 
+        while (!stoppingToken.IsCancellationRequested)
             await Task.Delay(1000, stoppingToken);
     }
 
@@ -78,7 +77,7 @@ public class TransactionEventConsumer : BaseEventConsumer
     {
         if (@event is TransactionCreatedEvent transactionCreatedEvent)
             await HandleTransactionCreatedEventAsync(transactionCreatedEvent, mediator);
-        else if (@event is TransactionStatusChangedEvent transactionStatusChangedEvent) 
+        else if (@event is TransactionStatusChangedEvent transactionStatusChangedEvent)
             await HandleTransactionStatusChangedEventAsync(transactionStatusChangedEvent, mediator);
     }
 
@@ -109,7 +108,8 @@ public class TransactionEventConsumer : BaseEventConsumer
         await mediator.Send(notificationCommand);
     }
 
-    private async Task HandleTransactionStatusChangedEventAsync(TransactionStatusChangedEvent @event, IMediator mediator)
+    private async Task HandleTransactionStatusChangedEventAsync(TransactionStatusChangedEvent @event,
+        IMediator mediator)
     {
         _logger.LogInformation(
             $"Handling TransactionStatusChangedEvent for transaction {@event.TransactionId}, new status: {@event.NewStatus}");
@@ -117,7 +117,7 @@ public class TransactionEventConsumer : BaseEventConsumer
         string templateName = null;
         if (@event.NewStatus == "Completed")
             templateName = "TransactionCompleted";
-        else if (@event.NewStatus == "Failed") 
+        else if (@event.NewStatus == "Failed")
             templateName = "TransactionFailed";
 
         if (!string.IsNullOrEmpty(templateName))

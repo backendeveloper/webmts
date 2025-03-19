@@ -12,7 +12,7 @@ public static class HealthCheckExtensions
         IConfiguration configuration)
     {
         services.AddHealthChecks()
-            .AddCheck("self", () => HealthCheckResult.Healthy(), tags: new[] { "api" })
+            .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["api"])
             .AddNpgSql(
                 configuration.GetConnectionString("DefaultConnection") ?? string.Empty,
                 name: "notificationdb-check",

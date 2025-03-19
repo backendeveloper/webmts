@@ -1,3 +1,4 @@
+using CustomerService.Business.Events;
 using CustomerService.Contract.Requests;
 using CustomerService.Contract.Responses;
 using CustomerService.Data;
@@ -10,37 +11,45 @@ public class DeleteCustomerHandler : IRequestHandler<DeleteCustomerRequest, Dele
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<DeleteCustomerHandler> _logger;
+    private readonly IEventBus _eventBus;
 
     public DeleteCustomerHandler(
         IUnitOfWork unitOfWork,
-        ILogger<DeleteCustomerHandler> logger)
+        ILogger<DeleteCustomerHandler> logger,
+        IEventBus eventBus)
     {
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _eventBus = eventBus;
     }
 
     public async Task<DeleteCustomerResponse> Handle(DeleteCustomerRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            var user = await _unitOfWork.Customers.GetByIdAsync(request.CustomerId);
-            if (user == null)
-            {
+            var customer = await _unitOfWork.Customers.GetByIdAsync(request.CustomerId);
+            if (customer == null)
                 return new DeleteCustomerResponse
                 {
                     Success = false,
                     Message = $"Customer with ID {request.CustomerId} not found"
                 };
-            }
 
             await _unitOfWork.BeginTransactionAsync();
 
             try
             {
-                _unitOfWork.Customers.Remove(user);
+                _unitOfWork.Customers.Remove(customer);
                 await _unitOfWork.CompleteAsync();
-
                 await _unitOfWork.CommitTransactionAsync();
+                
+                var customerDeletedEvent = new CustomerDeletedEvent
+                {
+                    CustomerId = customer.Id.ToString()
+                };
+
+                _eventBus.Publish(customerDeletedEvent);
+                _logger.LogInformation("Published CustomerDeletedEvent for customer {CustomerId}", customer.Id);
 
                 return new DeleteCustomerResponse
                 {

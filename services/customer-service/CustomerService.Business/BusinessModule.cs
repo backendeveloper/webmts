@@ -1,5 +1,6 @@
 using System.Reflection;
 using Autofac;
+using CustomerService.Business.Events;
 using CustomerService.Data;
 using MediatR;
 using Module = Autofac.Module;
@@ -16,5 +17,7 @@ public class BusinessModule : Module
         builder.RegisterAssemblyTypes(Assembly.GetExecutingAssembly())
             .AsClosedTypesOf(typeof(IRequestHandler<,>))
             .AsImplementedInterfaces();
+        
+        builder.RegisterType<RabbitMQEventBus>().As<IEventBus>().InstancePerLifetimeScope();
     }
 }
